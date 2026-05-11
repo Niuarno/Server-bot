@@ -6,7 +6,7 @@
     "type": "offline"
   },
   "server": {
-    "ip": "Platoopus.aternos.me",
+    "ip": "beachsalmon.aternos.host",
     "port": 42737,
     "version": "1.20.1",
     "try-creative": false
