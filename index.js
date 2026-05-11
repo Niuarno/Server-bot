@@ -1315,10 +1315,11 @@ function createBot() {
       if (
         reasonStr.includes("throttl") ||
         reasonStr.includes("wait before reconnect") ||
-        reasonStr.includes("too fast")
+        reasonStr.includes("too fast") ||
+        reasonStr.includes("duplicate_login")
       ) {
         addLog(
-          "[Bot] Throttle kick detected - will use extended reconnect delay",
+          "[Bot] Throttle or Duplicate Login detected - will use extended reconnect delay",
         );
         botState.wasThrottled = true;
       }
