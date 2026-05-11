@@ -2056,11 +2056,23 @@ process.on("unhandledRejection", (reason) => {
 });
 
 process.on("SIGTERM", () => {
-  addLog("[System] SIGTERM received — ignoring, bot will stay alive.");
+  addLog("[System] SIGTERM received — shutting down bot gracefully.");
+  if (bot) {
+    try {
+      bot.end();
+    } catch (e) {}
+  }
+  setTimeout(() => process.exit(0), 500);
 });
 
 process.on("SIGINT", () => {
-  addLog("[System] SIGINT received — ignoring, bot will stay alive.");
+  addLog("[System] SIGINT received — shutting down bot gracefully.");
+  if (bot) {
+    try {
+      bot.end();
+    } catch (e) {}
+  }
+  setTimeout(() => process.exit(0), 500);
 });
 
 // =============================
