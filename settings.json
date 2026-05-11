@@ -6,8 +6,8 @@
     "type": "offline"
   },
   "server": {
-    "ip": "dartfish.aternos.host",
-    "port": 62296,
+    "ip": "Platoopus.aternos.me",
+    "port": 42737,
     "version": "1.20.1",
     "try-creative": false
   },
