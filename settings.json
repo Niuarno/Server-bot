@@ -10,7 +10,7 @@
     "ip": "Platoopus.aternos.me",
     "port": 42737,
     "version": "1.20.1",
-    "try-creative": false
+    "try-creative": true
   },
   "position": {
     "enabled": true,
@@ -91,11 +91,6 @@
       "reactions": [
         "hi", "hello", "hey", "yo", "anyone here?", "afk?", "bot?", "s"
       ]
-    },
-    "ai": {
-      "enabled": true,
-      "mention-only": true,
-      "personality": "You are a friendly Minecraft player named unknown6767. You are currently exploring far away from spawn. Keep your answers short and human-like. Don't mention you are an AI."
     }
   }
 }
