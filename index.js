@@ -1592,9 +1592,10 @@ function initializeModules(bot, mcData, defaultMove) {
       config.movement["circle-walk"] &&
       config.movement["circle-walk"].enabled
     ) {
-      startCircleWalk(bot, defaultMove);
+      startHumanWalk(bot, defaultMove);
+      startLeaveRejoinCycle(bot);
     }
-    // FIX: only run random-jump if circle-walk is NOT running (circle-walk also keeps bot moving)
+    // FIX: only run random-jump if HumanWalk is NOT running
     if (
       config.movement["random-jump"] &&
       config.movement["random-jump"].enabled &&
@@ -1633,19 +1634,17 @@ function initializeModules(bot, mcData, defaultMove) {
 // ============================================================
 // MOVEMENT HELPERS
 // ============================================================
-function startCircleWalk(bot, defaultMove) {
-  const radius = config.movement["circle-walk"].radius;
-  let angle = 0;
-  let lastPathTime = 0;
-
+function startHumanWalk(bot, defaultMove) {
   addInterval(() => {
     if (!bot || !botState.connected) return;
-    const now = Date.now();
-    if (now - lastPathTime < 2000) return;
-    lastPathTime = now;
+    // Don't interrupt if already walking
+    if (bot.pathfinder && bot.pathfinder.isMoving()) return;
+
     try {
-      const x = bot.entity.position.x + Math.cos(angle) * radius;
-      const z = bot.entity.position.z + Math.sin(angle) * radius;
+      const radius = 5;
+      const x = bot.entity.position.x + (Math.random() * radius * 2 - radius);
+      const z = bot.entity.position.z + (Math.random() * radius * 2 - radius);
+      
       bot.pathfinder.setMovements(defaultMove);
       bot.pathfinder.setGoal(
         new GoalBlock(
@@ -1654,12 +1653,25 @@ function startCircleWalk(bot, defaultMove) {
           Math.floor(z),
         ),
       );
-      angle += Math.PI / 4;
       botState.lastActivity = Date.now();
     } catch (e) {
-      addLog("[CircleWalk] Error:", e.message);
+      addLog("[HumanWalk] Error:", e.message);
     }
-  }, config.movement["circle-walk"].speed);
+  }, 45000 + Math.floor(Math.random() * 45000)); // Walk every 45-90 seconds
+}
+
+function startLeaveRejoinCycle(bot) {
+  // Stay online for 20 to 45 minutes to reset Aternos session
+  const stayTime = (20 + Math.random() * 25) * 60 * 1000;
+  
+  addLog(`[System] Anti-Ban: Session will refresh in ${Math.floor(stayTime / 60000)} minutes.`);
+  
+  setTimeout(() => {
+    if (bot && botState.connected) {
+      addLog("[System] Refreshing session to reset Aternos idle timer...");
+      bot.quit();
+    }
+  }, stayTime);
 }
 
 function startRandomJump(bot) {
