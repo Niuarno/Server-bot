@@ -1281,10 +1281,15 @@ function createBot() {
       // FIX: use bot.version (auto-detected) instead of config value so minecraft-data always matches
       const mcData = require("minecraft-data")(bot.version);
       const defaultMove = new Movements(bot, mcData);
-      defaultMove.allowFreeMotion = false;
+      
+      // IMPROVED NAVIGATION
+      defaultMove.allowFreeMotion = true; // Allows smoother movement
       defaultMove.canDig = false;
-      defaultMove.liquidCost = 1000;
-      defaultMove.fallDamageCost = 1000;
+      defaultMove.canJump = true;
+      defaultMove.allowSprinting = true;
+      defaultMove.allowParkour = true; // Allows jumping over 1-block gaps
+      defaultMove.liquidCost = 10; // Make it more willing to swim if needed
+      defaultMove.fallDamageCost = 100;
 
       initializeModules(bot, mcData, defaultMove);
 
@@ -1519,8 +1524,44 @@ function initializeModules(bot, mcData, defaultMove) {
       addLog("[Position] Bot will start AFK activities once it reaches the destination.");
       navigationStarted = true;
 
+      // STUCK DETECTOR
+      let lastPos = bot.entity.position.clone();
+      let stuckTicks = 0;
+      const stuckInterval = setInterval(() => {
+        if (!bot || !botState.connected || !navigationStarted) {
+          clearInterval(stuckInterval);
+          return;
+        }
+        
+        const currentPos = bot.entity.position;
+        if (currentPos.distanceTo(lastPos) < 1) {
+          stuckTicks++;
+          if (stuckTicks >= 5) { // Stuck for 15 seconds (3s * 5)
+            addLog("[Position] Bot seems stuck. Attempting to jump/unstick...");
+            bot.setControlState("jump", true);
+            setTimeout(() => {
+              if (bot && botState.connected) bot.setControlState("jump", false);
+            }, 500);
+            
+            // Try to move in a random direction to bypass block
+            const yaw = bot.entity.yaw + (Math.random() * Math.PI / 2);
+            bot.look(yaw, 0, true);
+            bot.setControlState("forward", true);
+            setTimeout(() => {
+              if (bot && botState.connected) bot.setControlState("forward", false);
+            }, 1000);
+            
+            stuckTicks = 0;
+          }
+        } else {
+          stuckTicks = 0;
+        }
+        lastPos = currentPos.clone();
+      }, 3000);
+
       // Wait for goal reach to start modules
       bot.once("goal_reached", () => {
+        clearInterval(stuckInterval);
         addLog("[Position] Destination reached! Starting AFK modules...");
         startAFKModules(bot, mcData, defaultMove);
       });
