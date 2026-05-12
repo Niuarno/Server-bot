@@ -1516,58 +1516,11 @@ function initializeModules(bot, mcData, defaultMove) {
     });
 
     if (dist > 5) {
-      bot.pathfinder.setMovements(defaultMove);
-      bot.pathfinder.setGoal(
-        new GoalBlock(config.position.x, config.position.y, config.position.z),
-      );
-      addLog(`[Position] Long-range navigation started to X:${config.position.x} Y:${config.position.y} Z:${config.position.z} (Dist: ${Math.floor(dist)}m)`);
-      addLog("[Position] Bot will start AFK activities once it reaches the destination.");
       navigationStarted = true;
-
-      // STUCK DETECTOR
-      let lastPos = bot.entity.position.clone();
-      let stuckTicks = 0;
-      const stuckInterval = setInterval(() => {
-        if (!bot || !botState.connected || !navigationStarted) {
-          clearInterval(stuckInterval);
-          return;
-        }
-        
-        const currentPos = bot.entity.position;
-        if (currentPos.distanceTo(lastPos) < 1) {
-          stuckTicks++;
-          if (stuckTicks >= 5) { // Stuck for 15 seconds (3s * 5)
-            addLog("[Position] Bot seems stuck. Attempting to jump/unstick...");
-            bot.setControlState("jump", true);
-            setTimeout(() => {
-              if (bot && botState.connected) bot.setControlState("jump", false);
-            }, 500);
-            
-            // Try to move in a random direction to bypass block
-            const yaw = bot.entity.yaw + (Math.random() * Math.PI / 2);
-            bot.look(yaw, 0, true);
-            bot.setControlState("forward", true);
-            setTimeout(() => {
-              if (bot && botState.connected) bot.setControlState("forward", false);
-            }, 1000);
-            
-            stuckTicks = 0;
-          }
-        } else {
-          stuckTicks = 0;
-        }
-        lastPos = currentPos.clone();
-      }, 3000);
-
-      // Wait for goal reach to start modules
-      bot.once("goal_reached", () => {
-        clearInterval(stuckInterval);
+      startSmartNavigation(bot, config.position, mcData, defaultMove, () => {
         addLog("[Position] Destination reached! Starting AFK modules...");
         startAFKModules(bot, mcData, defaultMove);
       });
-      
-      // Failsafe: if navigation takes too long or fails, start anyway after 5 mins? 
-      // Actually, Aternos might kick for idle if it's stuck. Let's just start AFK interactions (swing, etc) even while walking.
     }
   }
 
@@ -2022,8 +1975,124 @@ function bedModule(bot, mcData) {
 
 // Chat module
 // FIX: wire up discord.events.chat flag
+function startSmartNavigation(bot, target, mcData, defaultMove, onReached) {
+  let stuckTicks = 0;
+  let lastPos = bot.entity.position.clone();
+  let waypointIndex = 0;
+  const WAYPOINT_DISTANCE = 300; // Move in 300-block segments to ensure chunk loading
+
+  const getWaypoints = (start, end) => {
+    const waypoints = [];
+    const dist = start.distanceTo(end);
+    const steps = Math.ceil(dist / WAYPOINT_DISTANCE);
+    for (let i = 1; i < steps; i++) {
+      waypoints.push({
+        x: start.x + ((end.x - start.x) * i) / steps,
+        z: start.z + ((end.z - start.z) * i) / steps,
+        y: end.y // assume similar height, pathfinder will adjust
+      });
+    }
+    waypoints.push(end);
+    return waypoints;
+  };
+
+  const waypoints = getWaypoints(bot.entity.position, target);
+  addLog(`[SmartNav] Path planned with ${waypoints.length} waypoints for stable travel.`);
+
+  const navigateToNext = () => {
+    if (waypointIndex >= waypoints.length) {
+      if (onReached) onReached();
+      return;
+    }
+
+    const next = waypoints[waypointIndex];
+    addLog(`[SmartNav] Moving to waypoint ${waypointIndex + 1}/${waypoints.length} (X:${Math.floor(next.x)} Z:${Math.floor(next.z)})`);
+    
+    bot.pathfinder.setMovements(defaultMove);
+    bot.pathfinder.setGoal(new GoalBlock(next.x, next.y, next.z));
+    waypointIndex++;
+  };
+
+  const stuckCheck = setInterval(() => {
+    if (!bot || !botState.connected) {
+      clearInterval(stuckCheck);
+      return;
+    }
+
+    const currentPos = bot.entity.position;
+    if (currentPos.distanceTo(lastPos) < 1) {
+      stuckTicks++;
+      if (stuckTicks >= 6) { // 18 seconds
+        addLog("[SmartNav] Bot stuck! Executing unstick maneuvers...");
+        bot.setControlState("jump", true);
+        setTimeout(() => bot.setControlState("jump", false), 500);
+        
+        // Random directional nudge
+        const yaw = bot.entity.yaw + (Math.random() * Math.PI - Math.PI / 2);
+        bot.look(yaw, 0, true);
+        bot.setControlState("forward", true);
+        setTimeout(() => {
+          bot.setControlState("forward", false);
+          // Recalculate current waypoint
+          waypointIndex = Math.max(0, waypointIndex - 1);
+          navigateToNext();
+        }, 2000);
+        stuckTicks = 0;
+      }
+    } else {
+      stuckTicks = 0;
+    }
+    lastPos = currentPos.clone();
+  }, 3000);
+
+  bot.on("goal_reached", () => {
+    if (waypointIndex < waypoints.length) {
+      navigateToNext();
+    } else {
+      clearInterval(stuckCheck);
+    }
+  });
+
+  bot.on("path_update", (results) => {
+    if (results.status === "noPath" && waypointIndex < waypoints.length) {
+      addLog("[SmartNav] No path found to waypoint, trying small jump...");
+      bot.setControlState("jump", true);
+      setTimeout(() => bot.setControlState("jump", false), 200);
+    }
+  });
+
+  navigateToNext();
+}
+
+// AI Response Function
+async function askAI(question) {
+  return new Promise((resolve) => {
+    try {
+      const personality = config.chat.ai.personality || "You are a Minecraft player.";
+      const url = `https://api.hercai.com/v3/hercai?question=${encodeURIComponent(question)}&personality=${encodeURIComponent(personality)}`;
+
+      https.get(url, (res) => {
+        let data = "";
+        res.on("data", (chunk) => (data += chunk));
+        res.on("end", () => {
+          try {
+            const json = JSON.parse(data);
+            resolve(json.reply || "");
+          } catch (e) {
+            resolve("");
+          }
+        });
+      }).on("error", () => resolve(""));
+    } catch (e) {
+      resolve("");
+    }
+  });
+}
+
 function chatModule(bot) {
-  bot.on("chat", (username, message) => {
+  let aiCooldown = false;
+
+  bot.on("chat", async (username, message) => {
     if (!bot || username === bot.username) return;
 
     try {
@@ -2038,6 +2107,29 @@ function chatModule(bot) {
       }
 
       const lowerMsg = message.toLowerCase();
+
+      // AI Chat Functionality
+      if (config.chat && config.chat.ai && config.chat.ai.enabled) {
+        const isMentioned = lowerMsg.includes(bot.username.toLowerCase()) || lowerMsg.includes("bot");
+        const shouldRespond = !config.chat.ai["mention-only"] || isMentioned;
+
+        if (shouldRespond && !aiCooldown) {
+          aiCooldown = true;
+          setTimeout(() => (aiCooldown = false), 10000); // 10s cooldown to avoid spam
+
+          const reply = await askAI(message);
+          if (reply) {
+            // Split long replies if necessary (MC chat limit is ~256 chars)
+            const parts = reply.match(/.{1,250}/g) || [reply];
+            for (const part of parts) {
+              setTimeout(() => {
+                if (bot && botState.connected) bot.chat(part);
+              }, 1000);
+            }
+            return; // Skip normal reactions if AI responded
+          }
+        }
+      }
 
       // Human-mode reactions
       if (config.chat && config.chat["human-mode"] && config.chat["human-mode"].enabled) {
