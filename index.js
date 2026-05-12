@@ -1164,10 +1164,10 @@ function addInterval(callback, delay) {
 }
 
 function generateRandomName() {
-  const prefix = "Bot_";
-  const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  const prefix = "unknown";
+  const chars = "0123456789";
   let randomStr = "";
-  for (let i = 0; i < 8; i++) {
+  for (let i = 0; i < 4; i++) {
     randomStr += chars.charAt(Math.floor(Math.random() * chars.length));
   }
   return prefix + randomStr;
@@ -1502,22 +1502,42 @@ function initializeModules(bot, mcData, defaultMove) {
   }
 
   // ---------- MOVE TO POSITION ----------
-  // FIX: only use position goal if circle-walk is NOT enabled (they fight over pathfinder)
-  if (
-    config.position &&
-    config.position.enabled &&
-    !(
-      config.movement &&
-      config.movement["circle-walk"] &&
-      config.movement["circle-walk"].enabled
-    )
-  ) {
-    bot.pathfinder.setMovements(defaultMove);
-    bot.pathfinder.setGoal(
-      new GoalBlock(config.position.x, config.position.y, config.position.z),
-    );
-    addLog("[Position] Navigating to configured position...");
+  let navigationStarted = false;
+  if (config.position && config.position.enabled) {
+    const dist = bot.entity.position.distanceTo({
+      x: config.position.x,
+      y: config.position.y,
+      z: config.position.z,
+    });
+
+    if (dist > 5) {
+      bot.pathfinder.setMovements(defaultMove);
+      bot.pathfinder.setGoal(
+        new GoalBlock(config.position.x, config.position.y, config.position.z),
+      );
+      addLog(`[Position] Long-range navigation started to X:${config.position.x} Y:${config.position.y} Z:${config.position.z} (Dist: ${Math.floor(dist)}m)`);
+      addLog("[Position] Bot will start AFK activities once it reaches the destination.");
+      navigationStarted = true;
+
+      // Wait for goal reach to start modules
+      bot.once("goal_reached", () => {
+        addLog("[Position] Destination reached! Starting AFK modules...");
+        startAFKModules(bot, mcData, defaultMove);
+      });
+      
+      // Failsafe: if navigation takes too long or fails, start anyway after 5 mins? 
+      // Actually, Aternos might kick for idle if it's stuck. Let's just start AFK interactions (swing, etc) even while walking.
+    }
   }
+
+  if (!navigationStarted) {
+    startAFKModules(bot, mcData, defaultMove);
+  }
+}
+
+// Separate function for AFK modules so they can be started after travel
+function startAFKModules(bot, mcData, defaultMove) {
+  addLog("[Modules] Activating AFK behavior...");
 
   // ---------- ANTI-AFK ----------
   if (config.utils["anti-afk"] && config.utils["anti-afk"].enabled) {
