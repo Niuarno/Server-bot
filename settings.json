@@ -3,7 +3,8 @@
   "bot-account": {
     "username": "unknown6767",
     "password": "",
-    "type": "offline"
+    "type": "offline",
+    "auto-rebrand": true
   },
   "server": {
     "ip": "Platoopus.aternos.me",
@@ -24,7 +25,9 @@
     },
     "anti-afk": {
       "enabled": true,
-      "sneak": true
+      "sneak": true,
+      "human-variations": true,
+      "interaction-delay": 15000
     },
     "chat-messages": {
       "enabled": false,
@@ -82,6 +85,12 @@
     }
   },
   "chat": {
-    "respond": true
+    "respond": true,
+    "human-mode": {
+      "enabled": true,
+      "reactions": [
+        "hi", "hello", "hey", "yo", "anyone here?", "afk?", "bot?", "s"
+      ]
+    }
   }
 }

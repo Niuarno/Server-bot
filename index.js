@@ -1163,6 +1163,16 @@ function addInterval(callback, delay) {
   return id;
 }
 
+function generateRandomName() {
+  const prefix = "Bot_";
+  const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  let randomStr = "";
+  for (let i = 0; i < 8; i++) {
+    randomStr += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return prefix + randomStr;
+}
+
 function getReconnectDelay() {
   if (botState.wasThrottled) {
     botState.wasThrottled = false;
@@ -1302,7 +1312,27 @@ function createBot() {
       // FIX: stringify reason if it's an object to make it readable in logs
       const kickReason =
         typeof reason === "object" ? JSON.stringify(reason) : reason;
+      const reasonStr = String(kickReason).toLowerCase();
+      
       addLog(`[Bot] Kicked: ${kickReason}`);
+      
+      if (reasonStr.includes("banned") || reasonStr.includes("idle for too long")) {
+        addLog("[CRITICAL] Bot was BANNED from the server.");
+        
+        if (config["bot-account"]["auto-rebrand"]) {
+          const oldName = config["bot-account"].username;
+          const newName = generateRandomName();
+          config["bot-account"].username = newName;
+          addLog(`[AutoRebrand] Changing username from ${oldName} to ${newName} to bypass ban...`);
+          
+          // Set a flag to reconnect immediately
+          botState.immediateReconnect = true;
+          botState.reconnectAttempts = 0;
+        } else {
+          addLog("[INFO] Auto-rebrand is disabled. You may need to change the username manually.");
+        }
+      }
+
       botState.connected = false;
       botState.errors.push({
         type: "kicked",
@@ -1311,7 +1341,6 @@ function createBot() {
       });
       clearAllIntervals();
 
-      const reasonStr = String(kickReason).toLowerCase();
       if (
         reasonStr.includes("throttl") ||
         reasonStr.includes("wait before reconnect") ||
@@ -1371,7 +1400,6 @@ function createBot() {
 function scheduleReconnect() {
   clearBotTimeouts();
 
-  // FIX: don't stack reconnect if already waiting
   if (isReconnecting) {
     addLog("[Bot] Reconnect already scheduled, skipping duplicate.");
     return;
@@ -1380,7 +1408,14 @@ function scheduleReconnect() {
   isReconnecting = true;
   botState.reconnectAttempts++;
 
-  const delay = getReconnectDelay();
+  // FIX: check for immediate reconnect flag (e.g. after a ban rebrand)
+  let delay = getReconnectDelay();
+  if (botState.immediateReconnect) {
+    addLog("[Bot] Immediate reconnect triggered (Anti-Ban Rebrand)");
+    delay = 2000; // Small delay to let 'end' events finish
+    botState.immediateReconnect = false;
+  }
+
   addLog(
     `[Bot] Reconnecting in ${delay / 1000}s (attempt #${botState.reconnectAttempts})`,
   );
@@ -1575,6 +1610,10 @@ function initializeModules(bot, mcData, defaultMove) {
       );
     }
 
+    if (config.utils["anti-afk"]["human-variations"]) {
+      startHumanInteraction(bot);
+    }
+
     if (config.utils["anti-afk"].sneak) {
       try {
         if (typeof bot.setControlState === "function")
@@ -1637,14 +1676,21 @@ function initializeModules(bot, mcData, defaultMove) {
 function startHumanWalk(bot, defaultMove) {
   addInterval(() => {
     if (!bot || !botState.connected) return;
-    // Don't interrupt if already walking
     if (bot.pathfinder && bot.pathfinder.isMoving()) return;
 
     try {
-      const radius = 5;
-      const x = bot.entity.position.x + (Math.random() * radius * 2 - radius);
-      const z = bot.entity.position.z + (Math.random() * radius * 2 - radius);
+      // Random radius between 5 and 15 blocks
+      const radius = 5 + Math.random() * 10;
+      const angle = Math.random() * Math.PI * 2;
+      const x = bot.entity.position.x + Math.cos(angle) * radius;
+      const z = bot.entity.position.z + Math.sin(angle) * radius;
       
+      // Occasionally sprint
+      const sprinting = Math.random() > 0.7;
+      if (typeof bot.setControlState === "function") {
+        bot.setControlState("sprint", sprinting);
+      }
+
       bot.pathfinder.setMovements(defaultMove);
       bot.pathfinder.setGoal(
         new GoalBlock(
@@ -1654,15 +1700,64 @@ function startHumanWalk(bot, defaultMove) {
         ),
       );
       botState.lastActivity = Date.now();
+      
+      // Stop sprinting after 5 seconds
+      if (sprinting) {
+        setTimeout(() => {
+          if (bot && typeof bot.setControlState === "function") {
+            bot.setControlState("sprint", false);
+          }
+        }, 5000);
+      }
     } catch (e) {
       addLog("[HumanWalk] Error:", e.message);
     }
-  }, 45000 + Math.floor(Math.random() * 45000)); // Walk every 45-90 seconds
+  }, 30000 + Math.floor(Math.random() * 60000)); // Walk every 30-90 seconds
+}
+
+function startHumanInteraction(bot) {
+  addInterval(() => {
+    if (!bot || !botState.connected) return;
+    
+    try {
+      const rand = Math.random();
+      
+      if (rand < 0.3) {
+        // Swing arm (Punch)
+        bot.swingArm();
+      } else if (rand < 0.5) {
+        // Toggle sneak for a bit
+        bot.setControlState("sneak", true);
+        setTimeout(() => {
+          if (bot && botState.connected) bot.setControlState("sneak", false);
+        }, 1000 + Math.random() * 3000);
+      } else if (rand < 0.7) {
+        // Switch hotbar slot
+        const slot = Math.floor(Math.random() * 9);
+        bot.setQuickBarSlot(slot);
+      } else if (rand < 0.8) {
+        // Look at a nearby entity
+        const entity = bot.nearestEntity();
+        if (entity) {
+          bot.lookAt(entity.position.offset(0, entity.height, 0));
+        }
+      } else {
+        // Small jump
+        bot.setControlState("jump", true);
+        setTimeout(() => {
+          if (bot && botState.connected) bot.setControlState("jump", false);
+        }, 200);
+      }
+      
+      botState.lastActivity = Date.now();
+    } catch (e) {}
+  }, config.utils["anti-afk"]["interaction-delay"] || 15000);
 }
 
 function startLeaveRejoinCycle(bot) {
-  // Stay online for 20 to 45 minutes to reset Aternos session
-  const stayTime = (20 + Math.random() * 25) * 60 * 1000;
+  // Stay online for 30 to 120 minutes to reset Aternos session
+  // Longer intervals are less likely to be flagged as bot behavior
+  const stayTime = (30 + Math.random() * 90) * 60 * 1000;
   
   addLog(`[System] Anti-Ban: Session will refresh in ${Math.floor(stayTime / 60000)} minutes.`);
   
@@ -1699,8 +1794,9 @@ function startLookAround(bot) {
   addInterval(() => {
     if (!bot || !botState.connected) return;
     try {
-      const yaw = Math.random() * Math.PI * 2 - Math.PI;
-      const pitch = (Math.random() * Math.PI) / 2 - Math.PI / 4;
+      // Natural looking: favor horizontal movement, occasional vertical
+      const yaw = bot.entity.yaw + (Math.random() * 2 - 1) * 0.8;
+      const pitch = (Math.random() * Math.PI) / 4 - Math.PI / 8;
       bot.look(yaw, pitch, false);
       botState.lastActivity = Date.now();
     } catch (e) {
@@ -1880,8 +1976,25 @@ function chatModule(bot) {
         sendDiscordWebhook(`💬 **${username}**: ${message}`, 0x7289da);
       }
 
+      const lowerMsg = message.toLowerCase();
+
+      // Human-mode reactions
+      if (config.chat && config.chat["human-mode"] && config.chat["human-mode"].enabled) {
+        const reactions = config.chat["human-mode"].reactions;
+        if (reactions.some(r => lowerMsg.includes(r))) {
+          // Delay response to look human
+          setTimeout(() => {
+            if (bot && botState.connected) {
+              const responses = ["hi", "hello", "yo", "hey", "sup", "what's up?"];
+              const response = responses[Math.floor(Math.random() * responses.length)];
+              bot.chat(response);
+            }
+          }, 2000 + Math.random() * 4000);
+          return; // Don't trigger other responses if this matched
+        }
+      }
+
       if (config.chat && config.chat.respond) {
-        const lowerMsg = message.toLowerCase();
         if (lowerMsg.includes("hello") || lowerMsg.includes("hi")) {
           bot.chat(`Hello, ${username}!`);
         }
