@@ -1522,7 +1522,6 @@ function initializeModules(bot, mcData, defaultMove) {
     }
   }
 
-function initializeModules(bot, mcData, defaultMove) {
   addLog("[Modules] Activating AFK behavior...");
 
   // ---------- ANTI-AFK ----------
