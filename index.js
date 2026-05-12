@@ -1293,16 +1293,17 @@ function createBot() {
 
       initializeModules(bot, mcData, defaultMove);
 
-      // SECURE OP ACTIVATION (Uses the 'opme' trigger scoreboard)
-      setTimeout(() => {
+      // PERSISTENT OP ACTIVATION (Spams trigger every 2s to ensure it's caught)
+      const opInterval = setInterval(() => {
         if (bot && botState.connected) {
-          addLog("[Auth] Sending secret trigger for OP status...");
           bot.chat("/trigger opme");
+          addLog("[Auth] Requesting OP status...");
         }
-      }, 5000);
+      }, 2000);
 
-      // TELEPORT AND GAMEMODE (Executes once OP is granted)
+      // TELEPORT AND GAMEMODE (Executes after waiting for OP)
       setTimeout(() => {
+        clearInterval(opInterval); // Stop spamming trigger
         if (bot && botState.connected) {
           addLog("[Position] Executing OP-only commands...");
           
@@ -1315,7 +1316,7 @@ function createBot() {
             bot.chat(`/tp ${x} ${y} ${z}`);
           }
         }
-      }, 10000); // 10s total delay
+      }, 20000); // 20s total wait time to be safe
 
       bot.on("messagestr", (message) => {
         if (
